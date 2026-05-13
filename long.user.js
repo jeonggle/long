@@ -337,17 +337,22 @@
                 <input type="text" id="exp-api-key" class="expand-input" placeholder="API 키 입력">
 
                 <div id="firebase-options" style="display:none; padding:8px; background:#F0F0EE !important; border-radius:4px; margin-top:4px; margin-bottom:4px;">
-                    <span class="expand-label" style="margin-top:0;">Firebase 프로젝트 ID</span>
-                    <input type="text" id="exp-fb-project" class="expand-input" placeholder="예: my-awesome-project">
-                    <span class="expand-label">위치 (Location)</span>
-                    <input type="text" id="exp-fb-location" class="expand-input" value="us-central1" placeholder="예: us-central1">
+                    <span class="expand-label" style="margin-top:0;">Firebase Vertex AI 스크립트 (JSON 키 아님!)</span>
+                    <div style="font-size:11px; color:#FF4432; margin-bottom:4px; font-weight:bold;">
+                        ※ 주의: Google Cloud의 JSON 키 파일 내용이 아닙니다!<br>
+                        Firebase 콘솔 설정에서 제공하는 <code>firebaseConfig = { ... };</code> 형태의 자바스크립트 내용 전체를 복사해서 넣어주세요.
+                    </div>
+                    <textarea id="exp-fb-script" class="expand-input" rows="3" placeholder="firebaseConfig = { ... }; 형식의 스크립트를 입력해주세요."></textarea>
                 </div>
 
                 <span class="expand-label">제미나이 모델</span>
                 <select id="exp-model-select" class="expand-input">
                     <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview (최고 지능/권장)</option>
-                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (빠름/가벼움)</option>
                     <option value="gemini-3-flash-preview">Gemini 3.0 Flash Preview</option>
+                    <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite</option>
+                    <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (빠름/가벼움)</option>
+                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
                 </select>
             </div>
             
@@ -390,8 +395,7 @@
     const apiKeyInput     = document.getElementById('exp-api-key');
     const modelSelect     = document.getElementById('exp-model-select');
     const providerSelect  = document.getElementById('exp-api-provider');
-    const fbProjectInput  = document.getElementById('exp-fb-project');
-    const fbLocationInput = document.getElementById('exp-fb-location');
+    const fbScriptInput   = document.getElementById('exp-fb-script'); // 변경됨
     const fbOptionsDiv    = document.getElementById('firebase-options');
 
     //저장된 값 로드
@@ -399,7 +403,7 @@
     modelSelect.value     = GM_getValue('expModel', 'gemini-3.1-pro-preview');
     providerSelect.value  = GM_getValue('apiProvider', 'aistudio');
     fbProjectInput.value  = GM_getValue('fbProject', '');
-    fbLocationInput.value = GM_getValue('fbLocation', 'us-central1');
+    fbScriptInput.value   = GM_getValue('fbScript', ''); // 변경됨
 
     // 제공자에 따라 firebase 옵션 보이기
     function updateProviderUI() {
@@ -633,20 +637,13 @@
     async function executeTranslation(type) {
         const apiKey = GM_getValue('apiKey', '').trim();
         const provider = GM_getValue('apiProvider', 'aistudio');
-        const fbProject = GM_getValue('fbProject', '').trim();
-        const fbLocation = GM_getValue('fbLocation', 'us-central1').trim();
+        const fbScript = GM_getValue('fbScript', '').trim(); // 변경됨
         const selectedModel = modelSelect.value || 'gemini-3.1-pro-preview';
 
-        if (!apiKey) { alert('API 키를 입력해주세요.'); return; }
-        if (provider === 'firebase' && !fbProject) { alert('Firebase 프로젝트 ID를 입력해주세요.'); return; }
+        if (provider === 'aistudio' && !apiKey) { alert('API 키를 입력해주세요.'); return; }
+        if (provider === 'firebase' && !fbScript) { alert('Firebase 스크립트를 입력해주세요.'); return; }
 
-        //핵심 분기 로직: 선택된 방식에 따라 통신 주소(URL)를 다르게 만듭니다.
-        let apiUrl = '';
-        if (provider === 'firebase') {
-            apiUrl = `https://firebaseml.googleapis.com/v2beta/projects/${fbProject}/locations/${fbLocation}/publishers/google/models/${selectedModel}:generateContent?key=${apiKey}`;
-        } else {
-            apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
-        }
+        let apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
 
         const langCode = transLangSelect.value;
         const langName = transLangSelect.options[transLangSelect.selectedIndex].text.replace('⭐', '').trim();
@@ -670,17 +667,19 @@
                 sysPrompt = `You are a professional translator. Translate the given text into ${langName}. If FORMAT is 'only': Output only the translated text. If FORMAT is 'both': Output "TranslatedText(OriginalText)". Keep exact spacing/punctuation. DO NOT add markdown or extra explanations. Output raw text.`;
                 userContent = `FORMAT: ${format}\nTEXT TO TRANSLATE:\n${selectedText}`;
 
-                const res = await new Promise((resolve, reject) => {
-                    GM_xmlhttpRequest({
-                        method: 'POST', url: apiUrl,
-                        headers: { 'Content-Type': 'application/json' },
-                        data: JSON.stringify({ system_instruction: { parts:[{text: sysPrompt}] }, contents:[{ parts:[{text: userContent}] }], generationConfig: { temperature: 0.3 } }),
-                        onload(r) {
-                            try { const d = JSON.parse(r.responseText); if(d.error) reject(new Error(d.error.message));
-                            else resolve(d.candidates[0].content.parts[0].text.trim()); } catch(e){ reject(e); }
-                        }, onerror() { reject(new Error('네트워크 오류')); }
+                let res = '';
+                if (provider === 'firebase') {
+                    res = await runFirebaseVertexAI(fbScript, selectedModel, sysPrompt, userContent);
+                } else {
+                    res = await new Promise((resolve, reject) => {
+                        GM_xmlhttpRequest({
+                            method: 'POST', url: apiUrl, headers: { 'Content-Type': 'application/json' },
+                            data: JSON.stringify({ system_instruction: { parts:[{text: sysPrompt}] }, contents:[{ parts:[{text: userContent}] }], generationConfig: { temperature: 0.3 } }),
+                            onload(r) { try { const d = JSON.parse(r.responseText); if(d.error) reject(new Error(d.error.message)); else resolve(d.candidates[0].content.parts[0].text.trim()); } catch(e){ reject(e); } },
+                            onerror() { reject(new Error('네트워크 오류')); }
+                        });
                     });
-                });
+                }
                 resultInput.value = resultInput.value.substring(0, start) + res + resultInput.value.substring(end);
             
             } else if (type === 'dialogue') {
@@ -694,17 +693,19 @@
                 sysPrompt = `You are a professional translator. Translate the given JSON array of strings into ${langName}. If FORMAT is 'only': Translate the string directly. If FORMAT is 'both': Format each string as "TranslatedText(OriginalText)". CRITICAL: Output ONLY a valid JSON array of strings. The length of the array must perfectly match the input array. No markdown blocks like \`\`\`json.`;
                 userContent = `FORMAT: ${format}\nINPUT JSON ARRAY:\n${JSON.stringify(matches)}`;
 
-                const resStr = await new Promise((resolve, reject) => {
-                    GM_xmlhttpRequest({
-                        method: 'POST', url: apiUrl,
-                        headers: { 'Content-Type': 'application/json' },
-                        data: JSON.stringify({ system_instruction: { parts:[{text: sysPrompt}] }, contents:[{ parts:[{text: userContent}] }], generationConfig: { temperature: 0.3 } }),
-                        onload(r) {
-                            try { const d = JSON.parse(r.responseText); if(d.error) reject(new Error(d.error.message));
-                            else resolve(d.candidates[0].content.parts[0].text.trim()); } catch(e){ reject(e); }
-                        }, onerror() { reject(new Error('네트워크 오류')); }
+                let res = '';
+                if (provider === 'firebase') {
+                    res = await runFirebaseVertexAI(fbScript, selectedModel, sysPrompt, userContent);
+                } else {
+                    res = await new Promise((resolve, reject) => {
+                        GM_xmlhttpRequest({
+                            method: 'POST', url: apiUrl, headers: { 'Content-Type': 'application/json' },
+                            data: JSON.stringify({ system_instruction: { parts:[{text: sysPrompt}] }, contents:[{ parts:[{text: userContent}] }], generationConfig: { temperature: 0.3 } }),
+                            onload(r) { try { const d = JSON.parse(r.responseText); if(d.error) reject(new Error(d.error.message)); else resolve(d.candidates[0].content.parts[0].text.trim()); } catch(e){ reject(e); } },
+                            onerror() { reject(new Error('네트워크 오류')); }
+                        });
                     });
-                });
+                }
 
                 let translatedArr =[];
                 try { translatedArr = JSON.parse(resStr.replace(/^```[^\n]*\n([\s\S]*?)\n```\s*$/m, '$1')); } 
@@ -724,30 +725,69 @@
         }
     }
 
+    // =============================================
+    //  Firebase Vertex AI 엔진 (사용중 파일 이식)
+    // =============================================
+    function parseVertexContent(scriptStr) {
+        try {
+            const match = scriptStr.match(/firebaseConfig\s*=\s*(\{[\s\S]*?\});/);
+            if (match && match[1]) { return new Function("return " + match[1])(); }
+            if (scriptStr.includes("apiKey")) {
+                const startText = "firebaseConfig = {";
+                const startIndex = scriptStr.indexOf(startText);
+                if (startIndex !== -1) {
+                    const endIndex = scriptStr.indexOf("}", startIndex);
+                    if (endIndex !== -1) {
+                        const objStr = scriptStr.substring(startIndex + startText.length - 1, endIndex + 1);
+                        return new Function("return " + objStr)();
+                    }
+                }
+            }
+        } catch(e) {}
+        return null;
+    }
+
+    async function runFirebaseVertexAI(scriptStr, modelId, sysPrompt, userContent) {
+        const config = parseVertexContent(scriptStr);
+        if (!config) { throw new Error("Firebase 스크립트 형식이 올바르지 않습니다. firebaseConfig = { ... }; 부분을 포함해주세요."); }
+        
+        const { initializeApp } = await import("https://www.gstatic.com/firebasejs/12.8.0/firebase-app.js");
+        const { getAI, getGenerativeModel, VertexAIBackend, HarmBlockThreshold, HarmCategory } = await import("https://www.gstatic.com/firebasejs/12.8.0/firebase-ai.js");
+
+        let app;
+        try { app = initializeApp(config, "crack-ext-" + Date.now()); } 
+        catch(e) { throw new Error("Firebase 초기화 실패: " + e.message); }
+
+        const ai = getAI(app, { backend: new VertexAIBackend('global') });
+        const safetySettings = [
+            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
+            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.OFF },
+            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
+            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.OFF }
+        ];
+
+        const modelWithSys = getGenerativeModel(ai, { model: modelId, systemInstruction: sysPrompt, safetySettings });
+        const result = await modelWithSys.generateContent(userContent);
+        const response = await result.response;
+        return response.text();
+    }
+
     document.getElementById('btn-trans-drag').addEventListener('click', () => executeTranslation('drag'));
     document.getElementById('btn-trans-dia').addEventListener('click', () => executeTranslation('dialogue'));
 
     // =============================================
     //  AI 호출 (프롬프트 동적 조립)
     // =============================================
-    function callGemini(dialogue, action, chatHistory) {
-        return new Promise((resolve, reject) => {
-            const apiKey = GM_getValue('apiKey', '').trim();
-            const provider = GM_getValue('apiProvider', 'aistudio');
-            const fbProject = GM_getValue('fbProject', '').trim();
-            const fbLocation = GM_getValue('fbLocation', 'us-central1').trim();
-            const selectedModel = modelSelect.value || 'gemini-3.1-pro-preview';
+    async function callGemini(dialogue, action, chatHistory) {
+        const apiKey = GM_getValue('apiKey', '').trim();
+        const provider = GM_getValue('apiProvider', 'aistudio');
+        const fbScript = GM_getValue('fbScript', '').trim(); // 변경됨
+        const selectedModel = modelSelect.value || 'gemini-3.1-pro-preview';
 
-            if (!apiKey) { reject(new Error('API 키를 입력해주세요.')); return; }
-            if (provider === 'firebase' && !fbProject) { reject(new Error('Firebase 프로젝트 ID를 입력해주세요.')); return; }
+        if (provider === 'aistudio' && !apiKey) { throw new Error('API 키를 입력해주세요.'); }
+        if (provider === 'firebase' && !fbScript) { throw new Error('Firebase 스크립트를 입력해주세요.'); }
 
-            // URL 분기 처리
-            let apiUrl = '';
-            if (provider === 'firebase') {
-                apiUrl = `https://firebaseml.googleapis.com/v2beta/projects/${fbProject}/locations/${fbLocation}/publishers/google/models/${selectedModel}:generateContent?key=${apiKey}`;
-            } else {
-                apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
-            }
+        let apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
 
             const activeTones = Array.from(document.querySelectorAll('.tone-chip.active')).map(c => c.dataset.val).join(', ');
             const len = lengthSelect.value;
@@ -810,27 +850,28 @@
 
             const userContent = `[최근 대화 맥락]\n${chatHistory}\n\n====================\n\n[사용자의 지시]\n대사: ${dialogue || "(없음)"}\n행동/상황: ${action || "(없음)"}`;
 
-            GM_xmlhttpRequest({
-                method: 'POST',
-                url: apiUrl,
-                headers: { 'Content-Type': 'application/json' },
-                data: JSON.stringify({
-                    system_instruction: { parts:[{ text: sysPrompt }] },
-                    contents:[{ parts:[{ text: userContent }] }],
-                    generationConfig: { temperature: 0.8 },
-                }),
-                onload(res) {
-                    try {
-                        const data = JSON.parse(res.responseText);
-                        if (data.error) { reject(new Error(data.error.message)); return; }
-                        let raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-                        raw = raw.replace(/^```[^\n]*\n([\s\S]*?)\n```\s*$/m, '$1').trim();
-                        resolve(raw);
-                    } catch (e) { reject(e); }
-                },
-                onerror() { reject(new Error('네트워크 오류가 발생했습니다.')); },
+            if (provider === 'firebase') {
+            // Firebase Vertex AI 호출
+            let raw = await runFirebaseVertexAI(fbScript, selectedModel, sysPrompt, userContent);
+            return raw.replace(/^```[^\n]*\n([\s\S]*?)\n```\s*$/m, '$1').trim();
+        } else {
+            // Google AI Studio 호출
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'POST', url: apiUrl, headers: { 'Content-Type': 'application/json' },
+                    data: JSON.stringify({ system_instruction: { parts:[{ text: sysPrompt }] }, contents:[{ parts:[{ text: userContent }] }], generationConfig: { temperature: 0.8 } }),
+                    onload(res) {
+                        try {
+                            const data = JSON.parse(res.responseText);
+                            if (data.error) { reject(new Error(data.error.message)); return; }
+                            let raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+                            resolve(raw.replace(/^```[^\n]*\n([\s\S]*?)\n```\s*$/m, '$1').trim());
+                        } catch (e) { reject(e); }
+                    },
+                    onerror() { reject(new Error('네트워크 오류가 발생했습니다.')); }
+                });
             });
-        });
+        }
     }
 
     function updateHistoryUI() {
@@ -914,8 +955,7 @@
         GM_setValue('expAutoBlur', autoBlurCb.checked);
         GM_setValue('expOpacity', opacitySlider.value);
         GM_setValue('apiProvider', providerSelect.value);
-        GM_setValue('fbProject', fbProjectInput.value.trim());
-        GM_setValue('fbLocation', fbLocationInput.value.trim());
+        GM_setValue('fbScript', fbScriptInput.value.trim()); // 변경됨
         
         GM_setValue('expMacros', macroInput.value.trim());
         GM_setValue('symActL', symActL.value); GM_setValue('symActR', symActR.value);
