@@ -9,7 +9,6 @@
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // @connect      generativelanguage.googleapis.com
-// @connect      firebasevertexai.googleapis.com
 // ==/UserScript==
 
 (function () {
@@ -326,23 +325,25 @@
             <!-- 아코디언: API 키 & 모델 -->
             <div class="acc-header" data-target="acc-api">▶ 🔑 API 키 & 제미나이 모델 설정</div>
             <div id="acc-api" class="acc-content">
-
                 <span class="expand-label" style="margin-top:0;">API 제공자 선택</span>
                 <select id="exp-api-provider" class="expand-input" style="margin-bottom: 8px;">
-                    <option value="aistudio">Google AI Studio (기본)</option>
-                    <option value="firebase">Firebase Vertex AI</option>
+                    <option value="google">Google AI Studio (일반 API Key)</option>
+                    <option value="firebase">Firebase (Vertex AI 스크립트)</option>
                 </select>
 
-                <span class="expand-label" style="margin-top:0;">API 키</span>
-                <input type="text" id="exp-api-key" class="expand-input" placeholder="API 키 입력">
+                <div id="google-key-container">
+                    <span class="expand-label" style="margin-top:0;">구글 API 키</span>
+                    <input type="text" id="exp-api-key" class="expand-input" placeholder="Gemini API 키">
+                </div>
 
-                <div id="firebase-options" style="display:none; padding:8px; background:#F0F0EE !important; border-radius:4px; margin-top:4px; margin-bottom:4px;">
-                    <span class="expand-label" style="margin-top:0;">Firebase Vertex AI 스크립트 (JSON 키 아님!)</span>
-                    <div style="font-size:11px; color:#FF4432; margin-bottom:4px; font-weight:bold;">
-                        ※ 주의: Google Cloud의 JSON 키 파일 내용이 아닙니다!<br>
-                        Firebase 콘솔 설정에서 제공하는 <code>firebaseConfig = { ... };</code> 형태의 자바스크립트 내용 전체를 복사해서 넣어주세요.
-                    </div>
-                    <textarea id="exp-fb-script" class="expand-input" rows="3" placeholder="firebaseConfig = { ... }; 형식의 스크립트를 입력해주세요."></textarea>
+                <div id="firebase-config-container" style="display:none;">
+                    <span class="expand-label" style="margin-top:0;">Firebase 스크립트 (웹용 SDK)</span>
+                    <p style="font-size:11px; color:#6A3DE8; margin:2px 0 6px 0; font-weight:bold; line-height:1.3;">
+                        💡 JSON 파일 내용이 아닙니다!<br>
+                        Firebase 콘솔 ➔ 프로젝트 설정 ➔ 내 앱 ➔ 웹 앱(&lt;/&gt;) 추가 후 나오는 코드 중<br>
+                        <code>const firebaseConfig = { ... };</code> 부분을 전체 복사해서 아래에 붙여넣어 주세요.
+                    </p>
+                    <textarea id="exp-firebase-script" class="expand-input" rows="4" placeholder="const firebaseConfig = {&#10;  apiKey: '...',&#10;  authDomain: '...',&#10;  ...&#10;};"></textarea>
                 </div>
 
                 <span class="expand-label">제미나이 모델</span>
@@ -351,7 +352,7 @@
                     <option value="gemini-3-flash-preview">Gemini 3.0 Flash Preview</option>
                     <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite</option>
                     <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (빠름/가벼움)</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                     <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
                 </select>
             </div>
@@ -392,30 +393,31 @@
     povNameInput.addEventListener('input', () => GM_setValue('expPovName', povNameInput.value));
 
     // API & 모델
-    const apiKeyInput     = document.getElementById('exp-api-key');
-    const modelSelect     = document.getElementById('exp-model-select');
     const providerSelect  = document.getElementById('exp-api-provider');
-    const fbScriptInput   = document.getElementById('exp-fb-script'); // 변경됨
-    const fbOptionsDiv    = document.getElementById('firebase-options');
+    const googleContainer = document.getElementById('google-key-container');
+    const firebaseContainer = document.getElementById('firebase-config-container');
+    const apiKeyInput     = document.getElementById('exp-api-key');
+    const firebaseScriptInput = document.getElementById('exp-firebase-script');
+    const modelSelect     = document.getElementById('exp-model-select');
 
-    //저장된 값 로드
+    providerSelect.value  = GM_getValue('expProvider', 'google');
     apiKeyInput.value     = GM_getValue('apiKey', '');
+    firebaseScriptInput.value = GM_getValue('firebaseScript', '');
     modelSelect.value     = GM_getValue('expModel', 'gemini-3.1-pro-preview');
-    providerSelect.value  = GM_getValue('apiProvider', 'aistudio');
-    fbProjectInput.value  = GM_getValue('fbProject', '');
-    fbScriptInput.value   = GM_getValue('fbScript', ''); // 변경됨
 
-    // 제공자에 따라 firebase 옵션 보이기
+    // 제공자 선택에 따라 화면 보이기/숨기기
     function updateProviderUI() {
-        if (providerSelect.value === 'firebase') {
-            fbOptionsDiv.style.display = 'block';
+        if (providerSelect.value === 'google') {
+            googleContainer.style.display = 'block';
+            firebaseContainer.style.display = 'none';
         } else {
-            fbOptionsDiv.style.display = 'none';
+            googleContainer.style.display = 'none';
+            firebaseContainer.style.display = 'block';
         }
     }
+    updateProviderUI();
     providerSelect.addEventListener('change', updateProviderUI);
-    updateProviderUI(); // 처음 스크립트 실행 시 1회 켜주기
-    
+
     const lengthSelect    = document.getElementById('exp-length');
     const styleSelect     = document.getElementById('exp-style-select');
     styleSelect.value     = GM_getValue('expStyle', '기본');
@@ -630,103 +632,7 @@
     }
 
     // =============================================
-    //  번역 모듈 (드래그 및 자동 대사)
-    // =============================================
-    function escapeRegExp(string) { return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-
-    async function executeTranslation(type) {
-        const apiKey = GM_getValue('apiKey', '').trim();
-        const provider = GM_getValue('apiProvider', 'aistudio');
-        const fbScript = GM_getValue('fbScript', '').trim(); // 변경됨
-        const selectedModel = modelSelect.value || 'gemini-3.1-pro-preview';
-
-        if (provider === 'aistudio' && !apiKey) { alert('API 키를 입력해주세요.'); return; }
-        if (provider === 'firebase' && !fbScript) { alert('Firebase 스크립트를 입력해주세요.'); return; }
-
-        let apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
-
-        const langCode = transLangSelect.value;
-        const langName = transLangSelect.options[transLangSelect.selectedIndex].text.replace('⭐', '').trim();
-        const format = transFormatSelect.value;
-        
-        pinnedLang = langCode; GM_setValue('pinnedLang', pinnedLang); renderTransLangs();
-
-        const btnDrag = document.getElementById('btn-trans-drag');
-        const btnDia = document.getElementById('btn-trans-dia');
-        btnDrag.disabled = true; btnDia.disabled = true;
-        statusBox.textContent = '🌐 텍스트 번역 중...';
-
-        try {
-            let sysPrompt = ''; let userContent = '';
-
-            if (type === 'drag') {
-                const start = resultInput.selectionStart; const end = resultInput.selectionEnd;
-                if (start === end) throw new Error('번역할 텍스트를 마우스로 드래그(블록 지정) 해주세요.');
-                
-                const selectedText = resultInput.value.substring(start, end);
-                sysPrompt = `You are a professional translator. Translate the given text into ${langName}. If FORMAT is 'only': Output only the translated text. If FORMAT is 'both': Output "TranslatedText(OriginalText)". Keep exact spacing/punctuation. DO NOT add markdown or extra explanations. Output raw text.`;
-                userContent = `FORMAT: ${format}\nTEXT TO TRANSLATE:\n${selectedText}`;
-
-                let res = '';
-                if (provider === 'firebase') {
-                    res = await runFirebaseVertexAI(fbScript, selectedModel, sysPrompt, userContent);
-                } else {
-                    res = await new Promise((resolve, reject) => {
-                        GM_xmlhttpRequest({
-                            method: 'POST', url: apiUrl, headers: { 'Content-Type': 'application/json' },
-                            data: JSON.stringify({ system_instruction: { parts:[{text: sysPrompt}] }, contents:[{ parts:[{text: userContent}] }], generationConfig: { temperature: 0.3 } }),
-                            onload(r) { try { const d = JSON.parse(r.responseText); if(d.error) reject(new Error(d.error.message)); else resolve(d.candidates[0].content.parts[0].text.trim()); } catch(e){ reject(e); } },
-                            onerror() { reject(new Error('네트워크 오류')); }
-                        });
-                    });
-                }
-                resultInput.value = resultInput.value.substring(0, start) + res + resultInput.value.substring(end);
-            
-            } else if (type === 'dialogue') {
-                const dL = symDiaL.value || '"'; const dR = symDiaR.value || '"';
-                const regex = new RegExp(`${escapeRegExp(dL)}(.*?)${escapeRegExp(dR)}`, 'g');
-                
-                const matches =[]; let match;
-                while ((match = regex.exec(resultInput.value)) !== null) { matches.push(match[1]); }
-                if (matches.length === 0) throw new Error('텍스트에서 대사를 찾을 수 없습니다.');
-
-                sysPrompt = `You are a professional translator. Translate the given JSON array of strings into ${langName}. If FORMAT is 'only': Translate the string directly. If FORMAT is 'both': Format each string as "TranslatedText(OriginalText)". CRITICAL: Output ONLY a valid JSON array of strings. The length of the array must perfectly match the input array. No markdown blocks like \`\`\`json.`;
-                userContent = `FORMAT: ${format}\nINPUT JSON ARRAY:\n${JSON.stringify(matches)}`;
-
-                let res = '';
-                if (provider === 'firebase') {
-                    res = await runFirebaseVertexAI(fbScript, selectedModel, sysPrompt, userContent);
-                } else {
-                    res = await new Promise((resolve, reject) => {
-                        GM_xmlhttpRequest({
-                            method: 'POST', url: apiUrl, headers: { 'Content-Type': 'application/json' },
-                            data: JSON.stringify({ system_instruction: { parts:[{text: sysPrompt}] }, contents:[{ parts:[{text: userContent}] }], generationConfig: { temperature: 0.3 } }),
-                            onload(r) { try { const d = JSON.parse(r.responseText); if(d.error) reject(new Error(d.error.message)); else resolve(d.candidates[0].content.parts[0].text.trim()); } catch(e){ reject(e); } },
-                            onerror() { reject(new Error('네트워크 오류')); }
-                        });
-                    });
-                }
-
-                let translatedArr =[];
-                try { translatedArr = JSON.parse(resStr.replace(/^```[^\n]*\n([\s\S]*?)\n```\s*$/m, '$1')); } 
-                catch(e) { throw new Error('번역 결과를 배열로 처리하는 데 실패했습니다.'); }
-
-                let i = 0;
-                resultInput.value = resultInput.value.replace(regex, (fullMatch, p1) => {
-                    if(i < translatedArr.length) { const replaced = `${dL}${translatedArr[i]}${dR}`; i++; return replaced; }
-                    return fullMatch;
-                });
-            }
-            statusBox.style.color = 'green'; statusBox.textContent = '🌐 번역이 완료되었습니다!';
-        } catch (e) {
-            statusBox.style.color = 'red'; statusBox.textContent = `❌ ${e.message}`;
-        } finally {
-            btnDrag.disabled = false; btnDia.disabled = false;
-        }
-    }
-
-    // =============================================
-    //  Firebase Vertex AI 엔진 (사용중 파일 이식)
+    // 통합 AI 호출 도우미 (Google & Firebase Vertex 통합)
     // =============================================
     function parseVertexContent(scriptStr) {
         try {
@@ -747,29 +653,130 @@
         return null;
     }
 
-    async function runFirebaseVertexAI(scriptStr, modelId, sysPrompt, userContent) {
-        const config = parseVertexContent(scriptStr);
-        if (!config) { throw new Error("Firebase 스크립트 형식이 올바르지 않습니다. firebaseConfig = { ... }; 부분을 포함해주세요."); }
+    async function fetchAIResponse(sysPrompt, userContent, temperature = 0.8) {
+        const provider = GM_getValue('expProvider', 'google');
+        const apiKey = GM_getValue('apiKey', '').trim();
+        const firebaseScript = GM_getValue('expFirebaseScript', '').trim();
+        const selectedModel = GM_getValue('expModel', 'gemini-3.1-pro-preview');
+
+        if (provider === 'google') {
+            if (!apiKey) throw new Error('API 키를 입력해주세요.');
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'POST', 
+                    url: `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`,
+                    headers: { 'Content-Type': 'application/json' },
+                    data: JSON.stringify({ 
+                        system_instruction: { parts:[{text: sysPrompt}] }, 
+                        contents:[{ parts:[{text: userContent}] }], 
+                        generationConfig: { temperature: temperature } 
+                    }),
+                    onload(r) {
+                        try { 
+                            const d = JSON.parse(r.responseText); 
+                            if(d.error) reject(new Error(d.error.message));
+                            else resolve(d.candidates[0].content.parts[0].text.trim()); 
+                        } catch(e){ reject(e); }
+                    }, onerror() { reject(new Error('네트워크 오류')); }
+                });
+            });
+        } else if (provider === 'firebase') {
+            if (!firebaseScript) throw new Error('Firebase 스크립트를 입력해주세요.');
+            const config = parseVertexContent(firebaseScript);
+            if (!config) throw new Error("Firebase 스크립트 형식이 올바르지 않습니다. firebaseConfig = { ... }; 부분을 포함해주세요.");
+
+            const { initializeApp } = await import("https://www.gstatic.com/firebasejs/12.8.0/firebase-app.js");
+            const { getAI, getGenerativeModel, VertexAIBackend, HarmBlockThreshold, HarmCategory } = await import("https://www.gstatic.com/firebasejs/12.8.0/firebase-ai.js");
+
+            let app;
+            try { app = initializeApp(config, "crack-ext-" + Date.now()); } 
+            catch(e) { throw new Error("Firebase 초기화 실패: " + e.message); }
+
+            const ai = getAI(app, { backend: new VertexAIBackend('global') });
+            const safetySettings = [
+                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
+                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.OFF },
+                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
+                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.OFF }
+            ];
+            
+            const modelWithSys = getGenerativeModel(ai, {
+                model: selectedModel,
+                systemInstruction: sysPrompt,
+                safetySettings,
+                generationConfig: { temperature: temperature }
+            });
+
+            const result = await modelWithSys.generateContent(userContent);
+            const response = await result.response;
+            return response.text();
+        }
+    }
+
+    // =============================================
+    //  번역 모듈 (드래그 및 자동 대사)
+    // =============================================
+    function escapeRegExp(string) { return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+    async function executeTranslation(type) {
+        const langCode = transLangSelect.value;
+        const langName = transLangSelect.options[transLangSelect.selectedIndex].text.replace('⭐', '').trim();
+        const format = transFormatSelect.value;
         
-        const { initializeApp } = await import("https://www.gstatic.com/firebasejs/12.8.0/firebase-app.js");
-        const { getAI, getGenerativeModel, VertexAIBackend, HarmBlockThreshold, HarmCategory } = await import("https://www.gstatic.com/firebasejs/12.8.0/firebase-ai.js");
+        pinnedLang = langCode; GM_setValue('pinnedLang', pinnedLang); renderTransLangs();
 
-        let app;
-        try { app = initializeApp(config, "crack-ext-" + Date.now()); } 
-        catch(e) { throw new Error("Firebase 초기화 실패: " + e.message); }
+        const btnDrag = document.getElementById('btn-trans-drag');
+        const btnDia = document.getElementById('btn-trans-dia');
+        btnDrag.disabled = true; btnDia.disabled = true;
+        statusBox.textContent = '🌐 텍스트 번역 중...';
 
-        const ai = getAI(app, { backend: new VertexAIBackend('global') });
-        const safetySettings = [
-            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
-            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.OFF },
-            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
-            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.OFF }
-        ];
+        try {
+            let sysPrompt = '';
+            let userContent = '';
 
-        const modelWithSys = getGenerativeModel(ai, { model: modelId, systemInstruction: sysPrompt, safetySettings });
-        const result = await modelWithSys.generateContent(userContent);
-        const response = await result.response;
-        return response.text();
+            if (type === 'drag') {
+                const start = resultInput.selectionStart;
+                const end = resultInput.selectionEnd;
+                if (start === end) throw new Error('번역할 텍스트를 마우스로 드래그(블록 지정) 해주세요.');
+                const selectedText = resultInput.value.substring(start, end);
+
+                sysPrompt = `You are a professional translator. Translate the given text into ${langName}.\nIf FORMAT is 'only': Output only the translated text. If FORMAT is 'both': Output "TranslatedText(OriginalText)". Keep exact spacing/punctuation.\nDO NOT add markdown or extra explanations. Output raw text.`;
+                userContent = `FORMAT: ${format}\nTEXT TO TRANSLATE:\n${selectedText}`;
+                
+                // 💡 새 통합 엔진 사용 (번역이므로 온도는 낮게 0.3 유지)
+                const res = await fetchAIResponse(sysPrompt, userContent, 0.3);
+                resultInput.value = resultInput.value.substring(0, start) + res + resultInput.value.substring(end);
+            
+            } else if (type === 'dialogue') {
+                const dL = symDiaL.value || '"'; const dR = symDiaR.value || '"';
+                const regex = new RegExp(`${escapeRegExp(dL)}(.*?)${escapeRegExp(dR)}`, 'g');
+                
+                const matches =[]; let match;
+                while ((match = regex.exec(resultInput.value)) !== null) { matches.push(match[1]); }
+                if (matches.length === 0) throw new Error('텍스트에서 대사를 찾을 수 없습니다.');
+
+                sysPrompt = `You are a professional translator. Translate the given JSON array of strings into ${langName}.\nIf FORMAT is 'only': Translate the string directly. If FORMAT is 'both': Format each string as "TranslatedText(OriginalText)".\nCRITICAL: Output ONLY a valid JSON array of strings. The length of the array must perfectly match the input array.\nNo markdown blocks like \`\`\`json.`;
+                userContent = `FORMAT: ${format}\nINPUT JSON ARRAY:\n${JSON.stringify(matches)}`;
+                
+                // 💡 새 통합 엔진 사용
+                const resStr = await fetchAIResponse(sysPrompt, userContent, 0.3);
+                
+                let translatedArr =[];
+                try { translatedArr = JSON.parse(resStr.replace(/^```[^\n]*\n([\s\S]*?)\n```\s*$/m, '$1')); } 
+                catch(e) { throw new Error('번역 결과를 배열로 처리하는 데 실패했습니다.'); }
+
+                let i = 0;
+                resultInput.value = resultInput.value.replace(regex, (fullMatch, p1) => {
+                    if(i < translatedArr.length) { const replaced = `${dL}${translatedArr[i]}${dR}`; i++; return replaced; }
+                    return fullMatch;
+                });
+            }
+            statusBox.style.color = 'green'; statusBox.textContent = '🌐 번역이 완료되었습니다!';
+        } catch (e) {
+            statusBox.style.color = 'red'; statusBox.textContent = `❌ ${e.message}`;
+        } finally {
+            btnDrag.disabled = false; btnDia.disabled = false;
+        }
     }
 
     document.getElementById('btn-trans-drag').addEventListener('click', () => executeTranslation('drag'));
@@ -779,99 +786,65 @@
     //  AI 호출 (프롬프트 동적 조립)
     // =============================================
     async function callGemini(dialogue, action, chatHistory) {
-        const apiKey = GM_getValue('apiKey', '').trim();
-        const provider = GM_getValue('apiProvider', 'aistudio');
-        const fbScript = GM_getValue('fbScript', '').trim(); // 변경됨
-        const selectedModel = modelSelect.value || 'gemini-3.1-pro-preview';
+        const activeTones = Array.from(document.querySelectorAll('.tone-chip.active')).map(c => c.dataset.val).join(', ');
+        const len = lengthSelect.value;
+        const mode = document.querySelector('input[name="exp-mode"]:checked').value;
+        const style = styleSelect.value; 
+        
+        const trpgResult = document.querySelector('.trpg-chip.active').dataset.val;
+        const aL = symActL.value || '*'; const aR = symActR.value || '*';
+        const dL = symDiaL.value || '"'; const dR = symDiaR.value || '"';
 
-        if (provider === 'aistudio' && !apiKey) { throw new Error('API 키를 입력해주세요.'); }
-        if (provider === 'firebase' && !fbScript) { throw new Error('Firebase 스크립트를 입력해주세요.'); }
+        const stealthDir = dirStealthInput.value.trim();
+        const sceneDir = dirSceneInput.value.trim();
+        const npcDir = dirNpcInput.value.trim();
+        const activeSenses = Array.from(document.querySelectorAll('.sense-chip.active')).map(c => c.dataset.val).join(', ');
 
-        let apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
+        const povMode = document.querySelector('input[name="exp-pov"]:checked').value;
+        const povName = document.getElementById('exp-pov-name').value.trim();
+        let povInstruction = "";
+        if (povMode === '1') povInstruction = "1. 시점 지정: 철저하게 사용자 캐릭터 중심의 1인칭('나') 시점으로 서술하십시오. 대명사 '나'를 사용하여 사용자의 시선과 내면을 묘사하십시오.\n";
+        else { const name = povName || "사용자 캐릭터"; povInstruction = `1. 시점 지정: 철저하게 '${name}' 중심의 3인칭 시점으로 서술하십시오. 서술 시 1인칭 대명사('나')를 쓰지 말고, '${name}'의 관점에서 행동과 내면을 묘사하십시오.\n`; }
 
-            const activeTones = Array.from(document.querySelectorAll('.tone-chip.active')).map(c => c.dataset.val).join(', ');
-            const len = lengthSelect.value;
-            const mode = document.querySelector('input[name="exp-mode"]:checked').value;
-            const style = styleSelect.value; 
-            
-            const trpgResult = document.querySelector('.trpg-chip.active').dataset.val;
-            const aL = symActL.value || '*'; const aR = symActR.value || '*';
-            const dL = symDiaL.value || '"'; const dR = symDiaR.value || '"';
-
-            const stealthDir = dirStealthInput.value.trim();
-            const sceneDir = dirSceneInput.value.trim();
-            const npcDir = dirNpcInput.value.trim();
-            const activeSenses = Array.from(document.querySelectorAll('.sense-chip.active')).map(c => c.dataset.val).join(', ');
-
-            // 시점 로직
-            const povMode = document.querySelector('input[name="exp-pov"]:checked').value;
-            const povName = document.getElementById('exp-pov-name').value.trim();
-            let povInstruction = "";
-            if (povMode === '1') povInstruction = "1. 시점 지정: 철저하게 사용자 캐릭터 중심의 1인칭('나') 시점으로 서술하십시오. 대명사 '나'를 사용하여 사용자의 시선과 내면을 묘사하십시오.\n";
-            else { const name = povName || "사용자 캐릭터"; povInstruction = `1. 시점 지정: 철저하게 '${name}' 중심의 3인칭 시점으로 서술하십시오. 서술 시 1인칭 대명사('나')를 쓰지 말고, '${name}'의 관점에서 행동과 내면을 묘사하십시오.\n`; }
-
-            const activeChars =[]; const activeLores =[];
-            for (let i = 1; i <= 10; i++) {
-                const ccb = document.getElementById(`char-active-${i}`); const cta = document.getElementById(`char-text-${i}`);
-                if (ccb && ccb.checked && cta && cta.value.trim()) activeChars.push(cta.value.trim());
-                const lcb = document.getElementById(`lore-active-${i}`); const lta = document.getElementById(`lore-text-${i}`);
-                if (lcb && lcb.checked && lta && lta.value.trim()) activeLores.push(lta.value.trim());
-            }
-            const combinedCharSettings = activeChars.join('\n\n');
-            const combinedLoreSettings = activeLores.join('\n\n');
-
-            let sysPrompt = `[역할 및 목적]\n당신은 사용자의 입력을 바탕으로 완벽한 롤플레잉 텍스트를 작성하는 '초월 작가'입니다.\n\n[작성 원칙: 시점, 양식, 타 캐릭터 조종 방지]\n${povInstruction}`;
-            sysPrompt += `2. 기호/양식 엄수 및 줄바꿈: 행동 지문과 서술/묘사는 반드시 ${aL} 와(과) ${aR} 기호로 감싸고, 대사는 반드시 ${dL} 와(과) ${dR} 기호로 감싸십시오. **서술과 대사 사이에는 반드시 줄바꿈(엔터)을 넣어 문단을 명확히 분리하십시오.**\n   - 예시:\n   ${aL}어이없다는 듯 웃으며 고개를 젓는다.${aR}\n   ${dL}무슨 수작이야?${dR}\n`;
-            sysPrompt += `3. 타 캐릭터 조종 방지: 상대방(NPC)의 대사를 임의로 지어내거나 깊은 내면을 서술하지 마십시오. 상대방의 행동은 사용자의 시야에 보이는 객관적이고 짧은 리액션 정도로 제한하십시오.\n4. 부연 설명이나 인사말 없이 오직 롤플레잉 본문만 출력하십시오.\n\n`;
-
-            if (combinedLoreSettings) sysPrompt += `[🌍 절대적 세계관/설정 규칙]\n${combinedLoreSettings}\n(위 설정은 세계관의 진리이므로 묘사 시 절대 위반하지 말 것)\n\n`;
-            if (combinedCharSettings) sysPrompt += `[내 캐릭터 고정 설정]\n${combinedCharSettings}\n(반드시 반영)\n\n`;
-            if (activeTones) sysPrompt += `[요구되는 분위기/톤]\n서술에 융합할 것: ${activeTones}\n\n`;
-
-            // 디렉터 모드 & 오감 프롬프트 삽입
-            if (stealthDir) sysPrompt += `[🥷 스텔스 이야기 유도 지시]\n다음 턴에 상대방 AI가 반드시 "${stealthDir}" 하게 반응하거나 행동할 수밖에 없도록, 내 행동과 묘사 속에 아주 교묘하고 강력한 떡밥(미끼)을 깔아둘 것. 절대 OOC나 괄호를 이용한 시스템 명령을 대놓고 쓰지 말고, 오직 '소설적 묘사와 행동의 디테일'만으로 상황을 강제 유도할 것.\n\n`;
-            if (sceneDir) sysPrompt += `[⏳ 장면 전환 지시]\n시간이나 장소가 "${sceneDir}" (으)로 전환됨을 알리십시오. 이전 상황을 스무스하게 정리하고 새로운 배경과 분위기가 시작되는 묘사를 자연스럽게 포함할 것.\n\n`;
-            if (npcDir) sysPrompt += `[👤 엑스트라 난입 지시]\n묘사 도중, "${npcDir}" 이(가) 불쑥 개입하거나 등장하여 현재 상황에 영향을 미치는 연출을 추가할 것.\n\n`;
-            if (activeSenses) sysPrompt += `[✨ 오감 집중 묘사 필터]\n서술 시 다음 감각을 극대화하여 영화처럼 생생하고 디테일하게 묘사할 것: ${activeSenses}\n\n`;
-
-            if (trpgResult !== '기본') {
-                sysPrompt += `[🎲 TRPG 주사위 결과 강제 적용]: 사용자의 행동(시도)에 대해 무조건 **[${trpgResult}]**의 결과가 나오도록 서술하십시오. 상황의 극적인 성공 또는 실패를 묘사하십시오.\n\n`;
-            }
-
-            if (mode === 'polish') sysPrompt += `[작업 모드: 단순 다듬기(윤문)]\n의미와 흐름을 유지하며 문장만 세련되게 다듬을 것.\n`;
-            else sysPrompt += `[작업 모드: 적극적 확장(부풀리기)]\n감정, 주변 묘사, 오감 디테일을 풍부하고 화려하게 살려 살을 붙일 것.\n`;
-
-            if (style !== '기본') sysPrompt += `[문체 스타일 지시]\n다음 문체를 적극 참고: ${style}\n\n`;
-            else sysPrompt += `\n`;
-
-            if (len === 'short') sysPrompt += `[분량 제한]: 간결하게 1~2문단 내외로 짧게 작성.\n`;
-            else if (len === 'medium') sysPrompt += `[분량 제한]: 적당한 분량(3~4문단)으로 작성.\n`;
-            else if (len === 'long') sysPrompt += `[분량 제한]: 아주 길고 디테일하게, 풍성한 묘사로 작성.\n`;
-
-            const userContent = `[최근 대화 맥락]\n${chatHistory}\n\n====================\n\n[사용자의 지시]\n대사: ${dialogue || "(없음)"}\n행동/상황: ${action || "(없음)"}`;
-
-            if (provider === 'firebase') {
-            // Firebase Vertex AI 호출
-            let raw = await runFirebaseVertexAI(fbScript, selectedModel, sysPrompt, userContent);
-            return raw.replace(/^```[^\n]*\n([\s\S]*?)\n```\s*$/m, '$1').trim();
-        } else {
-            // Google AI Studio 호출
-            return new Promise((resolve, reject) => {
-                GM_xmlhttpRequest({
-                    method: 'POST', url: apiUrl, headers: { 'Content-Type': 'application/json' },
-                    data: JSON.stringify({ system_instruction: { parts:[{ text: sysPrompt }] }, contents:[{ parts:[{ text: userContent }] }], generationConfig: { temperature: 0.8 } }),
-                    onload(res) {
-                        try {
-                            const data = JSON.parse(res.responseText);
-                            if (data.error) { reject(new Error(data.error.message)); return; }
-                            let raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-                            resolve(raw.replace(/^```[^\n]*\n([\s\S]*?)\n```\s*$/m, '$1').trim());
-                        } catch (e) { reject(e); }
-                    },
-                    onerror() { reject(new Error('네트워크 오류가 발생했습니다.')); }
-                });
-            });
+        const activeChars =[]; const activeLores =[];
+        for (let i = 1; i <= 10; i++) {
+            const ccb = document.getElementById(`char-active-${i}`); const cta = document.getElementById(`char-text-${i}`);
+            if (ccb && ccb.checked && cta && cta.value.trim()) activeChars.push(cta.value.trim());
+            const lcb = document.getElementById(`lore-active-${i}`); const lta = document.getElementById(`lore-text-${i}`);
+            if (lcb && lcb.checked && lta && lta.value.trim()) activeLores.push(lta.value.trim());
         }
+        const combinedCharSettings = activeChars.join('\n\n');
+        const combinedLoreSettings = activeLores.join('\n\n');
+
+        let sysPrompt = `[역할 및 목적]\n당신은 사용자의 입력을 바탕으로 완벽한 롤플레잉 텍스트를 작성하는 '초월 작가'입니다.\n\n[작성 원칙: 시점, 양식, 타 캐릭터 조종 방지]\n${povInstruction}`;
+        sysPrompt += `2. 기호/양식 엄수 및 줄바꿈: 행동 지문과 서술/묘사는 반드시 ${aL} 와(과) ${aR} 기호로 감싸고, 대사는 반드시 ${dL} 와(과) ${dR} 기호로 감싸십시오.\n**서술과 대사 사이에는 반드시 줄바꿈(엔터)을 넣어 문단을 명확히 분리하십시오.**\n   - 예시:\n   ${aL}어이없다는 듯 웃으며 고개를 젓는다.${aR}\n   ${dL}무슨 수작이야?${dR}\n`;
+        sysPrompt += `3. 타 캐릭터 조종 방지: 상대방(NPC)의 대사를 임의로 지어내거나 깊은 내면을 서술하지 마십시오.\n상대방의 행동은 사용자의 시야에 보이는 객관적이고 짧은 리액션 정도로 제한하십시오.\n4. 부연 설명이나 인사말 없이 오직 롤플레잉 본문만 출력하십시오.\n\n`;
+
+        if (combinedLoreSettings) sysPrompt += `[🌍 절대적 세계관/설정 규칙]\n${combinedLoreSettings}\n(위 설정은 세계관의 진리이므로 묘사 시 절대 위반하지 말 것)\n\n`;
+        if (combinedCharSettings) sysPrompt += `[내 캐릭터 고정 설정]\n${combinedCharSettings}\n(반드시 반영)\n\n`;
+        if (activeTones) sysPrompt += `[요구되는 분위기/톤]\n서술에 융합할 것: ${activeTones}\n\n`;
+        
+        if (stealthDir) sysPrompt += `[🥷 스텔스 이야기 유도 지시]\n다음 턴에 상대방 AI가 반드시 "${stealthDir}" 하게 반응하거나 행동할 수밖에 없도록, 내 행동과 묘사 속에 아주 교묘하고 강력한 떡밥(미끼)을 깔아둘 것.\n절대 OOC나 괄호를 이용한 시스템 명령을 대놓고 쓰지 말고, 오직 '소설적 묘사와 행동의 디테일'만으로 상황을 강제 유도할 것.\n\n`;
+        if (sceneDir) sysPrompt += `[⏳ 장면 전환 지시]\n시간이나 장소가 "${sceneDir}" (으)로 전환됨을 알리십시오.\n이전 상황을 스무스하게 정리하고 새로운 배경과 분위기가 시작되는 묘사를 자연스럽게 포함할 것.\n\n`;
+        if (npcDir) sysPrompt += `[👤 엑스트라 난입 지시]\n묘사 도중, "${npcDir}" 이(가) 불쑥 개입하거나 등장하여 현재 상황에 영향을 미치는 연출을 추가할 것.\n\n`;
+        if (activeSenses) sysPrompt += `[✨ 오감 집중 묘사 필터]\n서술 시 다음 감각을 극대화하여 영화처럼 생생하고 디테일하게 묘사할 것: ${activeSenses}\n\n`;
+        if (trpgResult !== '기본') sysPrompt += `[🎲 TRPG 주사위 결과 강제 적용]: 사용자의 행동(시도)에 대해 무조건 **[${trpgResult}]**의 결과가 나오도록 서술하십시오.\n상황의 극적인 성공 또는 실패를 묘사하십시오.\n\n`;
+
+        if (mode === 'polish') sysPrompt += `[작업 모드: 단순 다듬기(윤문)]\n의미와 흐름을 유지하며 문장만 세련되게 다듬을 것.\n`;
+        else sysPrompt += `[작업 모드: 적극적 확장(부풀리기)]\n감정, 주변 묘사, 오감 디테일을 풍부하고 화려하게 살려 살을 붙일 것.\n`;
+        if (style !== '기본') sysPrompt += `[문체 스타일 지시]\n다음 문체를 적극 참고: ${style}\n\n`;
+        else sysPrompt += `\n`;
+
+        if (len === 'short') sysPrompt += `[분량 제한]: 간결하게 1~2문단 내외로 짧게 작성.\n`;
+        else if (len === 'medium') sysPrompt += `[분량 제한]: 적당한 분량(3~4문단)으로 작성.\n`;
+        else if (len === 'long') sysPrompt += `[분량 제한]: 아주 길고 디테일하게, 풍성한 묘사로 작성.\n`;
+
+        const userContent = `[최근 대화 맥락]\n${chatHistory}\n\n====================\n\n[사용자의 지시]\n대사: ${dialogue || "(없음)"}\n행동/상황: ${action || "(없음)"}`;
+
+        // 💡 새 통합 엔진 사용 (집필이므로 온도는 약간 높은 0.8)
+        let rawResult = await fetchAIResponse(sysPrompt, userContent, 0.8);
+        rawResult = rawResult.replace(/^```[^\n]*\n([\s\S]*?)\n```\s*$/m, '$1').trim();
+        return rawResult;
     }
 
     function updateHistoryUI() {
@@ -949,13 +922,13 @@
     });
 
     document.getElementById('exp-save-btn').addEventListener('click', (e) => {
+        GM_setValue('expProvider', providerSelect.value);
         GM_setValue('apiKey', apiKeyInput.value.trim()); 
+        GM_setValue('expFirebaseScript', firebaseScriptInput.value.trim());
         GM_setValue('expModel', modelSelect.value);
-        GM_setValue('expMemory', memorySlider.value);
-        GM_setValue('expAutoBlur', autoBlurCb.checked);
-        GM_setValue('expOpacity', opacitySlider.value);
-        GM_setValue('apiProvider', providerSelect.value);
-        GM_setValue('fbScript', fbScriptInput.value.trim()); // 변경됨
+        //GM_setValue('expMemory', memorySlider.value);
+        //GM_setValue('expAutoBlur', autoBlurCb.checked);
+        //GM_setValue('expOpacity', opacitySlider.value);
         
         GM_setValue('expMacros', macroInput.value.trim());
         GM_setValue('symActL', symActL.value); GM_setValue('symActR', symActR.value);
