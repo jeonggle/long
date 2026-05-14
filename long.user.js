@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         크랙 AI 문장 부풀리기
 // @namespace    http://tampermonkey.net/
-// @version      17.0
+// @version      17.1
 // @description  다국어 번역, 디렉터 모드, 다중 프로필 등 유지
 // @match        https://crack.wrtn.ai/*
 // @grant        GM_setValue
@@ -9,6 +9,9 @@
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // @connect      generativelanguage.googleapis.com
+// @connect      firebase.google.com
+// @connect      gstatic.com
+// @connect      *.googleapis.com
 // ==/UserScript==
 
 (function () {
@@ -402,7 +405,7 @@
 
     providerSelect.value  = GM_getValue('expProvider', 'google');
     apiKeyInput.value     = GM_getValue('apiKey', '');
-    firebaseScriptInput.value = GM_getValue('firebaseScript', '');
+    firebaseScriptInput.value = GM_getValue('expFirebaseScript', '');
     modelSelect.value     = GM_getValue('expModel', 'gemini-3.1-pro-preview');
 
     // 제공자 선택에 따라 화면 보이기/숨기기
@@ -931,8 +934,10 @@
         //GM_setValue('expOpacity', opacitySlider.value);
         
         GM_setValue('expMacros', macroInput.value.trim());
-        GM_setValue('symActL', symActL.value); GM_setValue('symActR', symActR.value);
-        GM_setValue('symDiaL', symDiaL.value); GM_setValue('symDiaR', symDiaR.value);
+        GM_setValue('symActL', symActL.value); 
+        GM_setValue('symActR', symActR.value);
+        GM_setValue('symDiaL', symDiaL.value); 
+        GM_setValue('symDiaR', symDiaR.value);
 
         for (let i = 1; i <= 10; i++) {
             const ccb = document.getElementById(`char-active-${i}`); const cta = document.getElementById(`char-text-${i}`);
