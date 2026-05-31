@@ -918,7 +918,7 @@
   }
 
   // =============================================
-    // 7. UI 자동 주입 (페이지 꼬임 및 자동 줄바꿈 버그 해결 완벽판)
+    // 7. UI 자동 주입 (빈 값 전송 허용 패치 완료)
     // =============================================
     let currentRoomId = '';
 
@@ -929,7 +929,7 @@
             loadCfg();
         }
 
-        // [1] AI 설정 버튼(⚙️) 주입 (원래 자리 보존)
+        // [1] AI 설정 버튼(⚙️) 주입
         const modelBtn = Array.from(document.querySelectorAll('button')).find(btn => {
             return btn.querySelector('img[src*="model-icon"]');
         });
@@ -968,7 +968,7 @@
             gBtn.id = 'crack-pure-magic-btn'; gBtn.className = 'crack-pure-magic';
             gBtn.innerHTML = `<span id="magic-icon" style="font-size: 14px;">✨</span>`;
 
-            // 🌟 [해결책 ②] 페이지 이동 시 줄바꿈 버그를 치료하는 입력창 업데이트 함수
+            // 페이지 이동 시 글자 주입 함수
             const updateChatInputFromHistory = () => {
                 const chatInput = document.querySelector('.__chat_input_textarea, div[contenteditable="true"], textarea');
                 if (!chatInput || generatedHistory.length === 0) return;
@@ -981,12 +981,9 @@
                     chatInput.style.height = 'auto'; 
                     chatInput.style.height = chatInput.scrollHeight + 'px';
                 } else {
-                    // 🔥 기존의 <p> 태그 삽입 방식을 전면 폐기하고, 순수 텍스트(innerText)로 주입합니다.
-                    // 이렇게 하면 에디터가 임의로 줄바꿈을 누적 생성하지 않고 깔끔하게 텍스트만 교체됩니다.
                     chatInput.innerText = textToInsert;
                 }
                 
-                // 사이트 시스템(React 등)에 입력값이 변경되었음을 알려 강제 동기화합니다.
                 chatInput.dispatchEvent(new Event('input', { bubbles: true }));
                 chatInput.focus();
 
@@ -1002,33 +999,29 @@
                 if (historyIndex < generatedHistory.length - 1) { historyIndex++; updateChatInputFromHistory(); }
             };
 
-            // 🌟 [해결책 ①] 마법 버튼을 눌렀을 때 실행되는 핵심 로직 (순서 교정)
+            // 마법 버튼 클릭 이벤트
             gBtn.onclick = async (e) => {
                 e.preventDefault();
                 const chatInput = document.querySelector('.__chat_input_textarea, div[contenteditable="true"], textarea');
                 if (!chatInput) return alert('채팅 입력창을 찾을 수 없습니다.');
 
-                // 입력창 형식에 알맞게 유저가 쓴 글을 가져옵니다.
-                const baseText = chatInput.tagName === 'TEXTAREA' ? chatInput.value.trim() : chatInput.innerText.trim();
-                if (!baseText) return;
+                // 🌟 원래대로 글자 제한 없이 온전하게 입력값을 가져옵니다 (비어있어도 OK)
+                const baseText = chatInput.tagName === 'TEXTAREA' ? chatInput.value : chatInput.innerText;
 
                 const icon = document.getElementById('magic-icon');
                 icon.innerHTML = '⏳'; icon.classList.add('spin-anim');
 
                 try {
-                    // 🔥 [핵심] AI를 호출하기 "전"에 유저가 타이핑한 소중한 원본 본문을 1페이지에 먼저 확실하게 못 박아 둡니다!
+                    // 🌟 'if (!baseText) return;' 코드를 삭제했기 때문에 빈 값이어도 아래로 정상 통과합니다!
                     if (generatedHistory.length === 0) {
                         generatedHistory.push(baseText);
                     }
 
-                    // 이제 안전하게 외부 AI를 호출하여 답변을 받아옵니다.
                     const result = await callGemini(baseText);
 
-                    // 받아온 AI 문장을 2페이지에 집어넣습니다.
                     generatedHistory.push(result);
                     historyIndex = generatedHistory.length - 1;
 
-                    // 화면 입력창에 AI가 만든 따끈따끈한 문장을 띄워줍니다.
                     updateChatInputFromHistory();
 
                     if (generatedHistory.length > 1) {
@@ -1042,7 +1035,6 @@
             group.appendChild(gBtn);
             group.appendChild(sendBtn);
 
-            // [전송] 버튼 클릭 시 역사 페이지 전체 초기화
             sendBtn.addEventListener('click', () => {
                 generatedHistory = [];
                 historyIndex = -1;
@@ -1050,12 +1042,10 @@
             });
         }
 
-        // 🌟 [해결책 ③] 새로운 입력창 에디터에서도 엔터(Enter) 전송 시 역사 페이지가 깔끔하게 비워지도록 수정
         const chatInput = document.querySelector('.__chat_input_textarea, div[contenteditable="true"], textarea');
         if (chatInput && !chatInput.dataset.historyHooked) {
             chatInput.dataset.historyHooked = 'true';
             chatInput.addEventListener('keydown', (e) => {
-                // 줄바꿈(Shift+Enter)이 아니라 진짜 전송(Enter)을 누른 경우에만 초기화 진행
                 if (e.key === 'Enter' && !e.shiftKey) {
                     generatedHistory = [];
                     historyIndex = -1;
