@@ -413,6 +413,8 @@
         </div>
     `;
   document.body.appendChild(panel);
+  // 패널이 DOM에 추가된 직후 모든 이벤트를 등록
+  initPanelEvents();
 
   // =============================================
   // 2-1. API 모델에 따른 동적 UI 업데이트 (추론 강도 vs 예산)
@@ -762,45 +764,50 @@
     alert("글로벌 설정이 저장되었습니다!");
   };
 
-  document.getElementById("close-panel").onclick = () =>
-    (panel.style.display = "none");
-  document.getElementById("cfg-save-btn").onclick = saveCfg;
+  function initPanelEvents() {
+    document.getElementById("close-panel").onclick = () =>
+      (panel.style.display = "none");
 
-  document.querySelectorAll(".tone-chip").forEach((chip) => {
-    chip.onclick = () => chip.classList.toggle("active");
-  });
+    document.getElementById("cfg-save-btn").onclick = saveCfg;
 
-  document.getElementsByName("cfg-pov").forEach((r) => {
-    r.addEventListener("change", () => {
-      document.getElementById("cfg-pov-name").style.display =
-        r.value === "3" ? "block" : "none";
+    document.querySelectorAll(".tone-chip").forEach((chip) => {
+      chip.onclick = () => chip.classList.toggle("active");
     });
-  });
 
-  document.getElementById("cfg-memory").addEventListener("input", (e) => {
-    document.getElementById("mem-val").innerText = e.target.value;
-  });
-  document.getElementById("cfg-len").addEventListener("input", (e) => {
-    document.getElementById("len-val").innerText = e.target.value;
-  });
-  egoSlider.addEventListener("input", () => {
-    egoDesc.innerText = egoTexts[egoSlider.value - 1];
-  });
-
-  document.querySelectorAll(".acc-header").forEach((header) => {
-    header.addEventListener("click", () => {
-      const target = document.getElementById(
-        header.getAttribute("data-target"),
-      );
-      const isOpen = target.classList.contains("open");
-      target.classList.toggle("open");
-      header.innerHTML = header.innerHTML.replace(
-        isOpen ? "▲" : "▼",
-        isOpen ? "▼" : "▲",
-      );
+    document.getElementsByName("cfg-pov").forEach((r) => {
+      r.addEventListener("change", () => {
+        document.getElementById("cfg-pov-name").style.display =
+          r.value === "3" ? "block" : "none";
+      });
     });
-  });
 
+    document.getElementById("cfg-memory").addEventListener("input", (e) => {
+      document.getElementById("mem-val").innerText = e.target.value;
+    });
+    document.getElementById("cfg-len").addEventListener("input", (e) => {
+      document.getElementById("len-val").innerText = e.target.value;
+    });
+    egoSlider.addEventListener("input", () => {
+      egoDesc.innerText = egoTexts[egoSlider.value - 1];
+    });
+
+    document.querySelectorAll(".acc-header").forEach((header) => {
+      // 화살표 span을 미리 변수로 저장 (innerHTML 전체를 건드리지 않음)
+      const arrowSpan = header.querySelector("span");
+
+      header.addEventListener("click", () => {
+        const target = document.getElementById(
+          header.getAttribute("data-target"),
+        );
+        const isOpen = target.classList.contains("open");
+        target.classList.toggle("open");
+        // innerHTML.replace() 대신 span 텍스트만 직접 교체
+        if (arrowSpan) {
+          arrowSpan.textContent = isOpen ? "▼" : "▲";
+        }
+      });
+    });
+  }
   // =============================================
   // 6. Gemini API / Firebase 통신
   // =============================================
