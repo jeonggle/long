@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         크랙 AI 답변 커스텀(제미나이API & Firebase 통합)
 // @namespace    http://tampermonkey.net/
-// @version      3.4.0
+// @version      3.4.1
 // @description  페이지 버그 수정, 요금 계산 UI 추가 등
 // @match        https://crack.wrtn.ai/*
 // @grant        GM_addStyle
@@ -413,8 +413,6 @@
         </div>
     `;
   document.body.appendChild(panel);
-  // 패널이 DOM에 추가된 직후 모든 이벤트를 등록
-  initPanelEvents();
 
   // =============================================
   // 2-1. API 모델에 따른 동적 UI 업데이트 (추론 강도 vs 예산)
@@ -808,6 +806,10 @@
       });
     });
   }
+
+  // 패널이 DOM에 추가된 직후 모든 이벤트를 등록
+  initPanelEvents();
+
   // =============================================
   // 6. Gemini API / Firebase 통신
   // =============================================
