@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         크랙 AI 답변 커스텀(제미나이API & Firebase 통합)
 // @namespace    http://tampermonkey.net/
-// @version      3.3.2
+// @version      3.3.3
 // @description  명령어 퀄리티 극대화, 설정 버튼 반응형(모바일) UI 패치, Firebase Vertex API 지원 추가
 // @match        https://crack.wrtn.ai/*
 // @grant        GM_addStyle
@@ -142,6 +142,133 @@
         @keyframes crack-spin { 100% { transform: rotate(360deg); } }
         .spin-anim { display: inline-block; animation: crack-spin 1s linear infinite; }
     `);
+
+  // =============================================
+  // [추가] 1-1. 모델별 요금표 및 임시 설정 저장소
+  // =============================================
+  const MODEL_PRICING = {
+    "gemini-3.1-flash-lite-preview": {
+      input: 0.25,
+      output: 1.5,
+      cacheRead: 0.025,
+      cacheWrite: 0.25,
+    },
+    "gemini-3-flash-preview": {
+      input: 0.5,
+      output: 3.0,
+      cacheRead: 0.05,
+      cacheWrite: 0.5,
+    },
+    "gemini-3.5-flash": {
+      input: 1.5,
+      output: 9.0,
+      cacheRead: 0.15,
+      cacheWrite: 1.5,
+    }, // ✨ 새 모델 추가!
+    "gemini-2.5-pro": {
+      input: 1.25,
+      output: 10.0,
+      cacheRead: 0.125,
+      cacheWrite: 1.25,
+    },
+    "gemini-3.1-pro-preview": {
+      input: 2.0,
+      output: 12.0,
+      cacheRead: 0.2,
+      cacheWrite: 2.0,
+    },
+  };
+
+  // UI 전환 시 유저가 설정한 값을 기억해 둘 임시 보관함입니다.
+  let tempThinkingLevels = {};
+  let tempThinkingBudgets = {};
+
+  // ① Usage 데이터 정규화 함수 (다양한 API 응답 형식을 하나로 통일)
+  function normalizeUsage(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const u = {};
+    u.model = raw.model || String(raw.model || "");
+
+    const pick = (keys) => {
+      for (const k of keys) {
+        const v = raw[k];
+        if (typeof v === "number") return v;
+        if (typeof v === "string" && !isNaN(Number(v))) return Number(v);
+      }
+      return 0;
+    };
+
+    u.inputTokens = pick([
+      "inputTokens",
+      "input_tokens",
+      "promptTokenCount",
+      "prompt_token_count",
+      "promptTokens",
+    ]);
+    u.outputTokens = pick([
+      "outputTokens",
+      "output_tokens",
+      "candidatesTokenCount",
+      "candidates_token_count",
+    ]);
+    u.cacheReadInputTokens = pick([
+      "cacheReadInputTokens",
+      "cache_read_input_tokens",
+      "cachedContentTokenCount",
+      "cached_content_token_count",
+    ]);
+    u.thoughtsTokenCount = pick([
+      "thoughtsTokenCount",
+      "thoughts_token_count",
+      "thinking_tokens",
+    ]);
+    return u;
+  }
+
+  // ② 실제 사용 요금 계산식 함수 (환율 1500원 기준 기본 세팅)
+  function calculateCost(usage, exchangeRate = 1500, modelOverride = "") {
+    const u = usage ? normalizeUsage(usage) : null;
+    if (!u) return null;
+
+    const modelIdRaw = u.model || modelOverride;
+    const pricing =
+      MODEL_PRICING[modelIdRaw] || MODEL_PRICING["gemini-3.5-flash"]; // 기본값 3.5 플래시
+    if (!pricing) return null;
+
+    const thoughtsTokens = u.thoughtsTokenCount || 0;
+    const cacheReadTokens = u.cacheReadInputTokens || 0;
+    const totalInputTokens = u.inputTokens || 0;
+    const totalOutputTokens = u.outputTokens || 0;
+
+    let actualOutputTokens = 0;
+    if (thoughtsTokens > 0 && totalOutputTokens >= thoughtsTokens) {
+      actualOutputTokens = totalOutputTokens - thoughtsTokens; // 전체 출력에서 추론 토큰 분리
+    } else {
+      actualOutputTokens = totalOutputTokens;
+    }
+
+    const uncachedInputTokens = Math.max(0, totalInputTokens - cacheReadTokens);
+
+    // 100만 토큰당 달러 기준으로 단가 계산
+    const readCost = (cacheReadTokens * pricing.cacheRead) / 1000000;
+    const writeCost = (uncachedInputTokens * pricing.cacheWrite) / 1000000;
+    const outputCost = (actualOutputTokens * pricing.output) / 1000000;
+    const thoughtsCost = (thoughtsTokens * pricing.output) / 1000000;
+
+    const totalUsd = readCost + writeCost + outputCost + thoughtsCost;
+    const totalKrw = totalUsd * exchangeRate;
+
+    return {
+      usd: totalUsd,
+      krw: totalKrw,
+      tokens: {
+        read: cacheReadTokens,
+        write: uncachedInputTokens,
+        output: actualOutputTokens,
+        thoughts: thoughtsTokens,
+      },
+    };
+  }
 
   // =============================================
   // 2. 패널 구성
@@ -287,6 +414,50 @@
   document.body.appendChild(panel);
 
   // =============================================
+  // 2-1. [수정] callGemini 내부 페이로드 조립 부분
+  // =============================================
+  const payload = {
+    contents: [{ parts: [{ text: fullPrompt }] }],
+    generationConfig: {},
+  };
+
+  // gemini-3 계열이 아닐 때만 기존 온도를 적용합니다.
+  if (!config.model.includes("gemini-3")) {
+    payload.generationConfig.temperature = parseFloat(
+      config.temperature || 0.7,
+    );
+  }
+
+  // 🧠 모델명에 따른 스마트 추론(Thinking Config) 설정 주입
+  if (config.model.includes("gemini-3")) {
+    payload.generationConfig.thinkingConfig = {
+      thinkingLevel:
+        (config.thinkingLevels && config.thinkingLevels[config.model]) ||
+        "medium",
+    };
+  } else if (config.model.includes("gemini-2.5")) {
+    let budget =
+      (config.thinkingBudgets && config.thinkingBudgets[config.model]) || 1024;
+    if (budget < 128) budget = 128; // API 오류 방지용 최솟값 락(Lock)
+    payload.generationConfig.thinkingConfig = {
+      thinkingBudget: budget,
+    };
+  }
+
+  // ... 이 중간에는 GM_xmlhttpRequest 또는 fetch를 통해 서버로 데이터를 보내는 코드가 있습니다 ...
+
+  // =============================================
+  // 2-2. [수정] API 응답 성공 후 리턴(Return) 부분
+  // =============================================
+  // 기존에는 단순히 텍스트만 리턴했다면, 이제는 요금 계산을 위해 토큰 정보(usageMetadata)도 함께 묶어서 돌려줍니다.
+  const res = JSON.parse(response.responseText);
+  return {
+    text: res.candidates[0].content.parts[0].text,
+    usage: res.usageMetadata || {},
+    model: config.model,
+  };
+
+  // =============================================
   // 3. 패널 드래그 관리
   // =============================================
   const dragHandle = document.getElementById("panel-drag-handle");
@@ -356,6 +527,112 @@
   });
 
   // =============================================
+  // 3-1. [수정] 페이지 이동 시 화면을 갱신하는 함수
+  // =============================================
+  const updateChatInputFromHistory = () => {
+    const chatInput = document.querySelector(
+      '.__chat_input_textarea, div[contenteditable="true"], textarea',
+    );
+    if (!chatInput || generatedHistory.length === 0) return;
+
+    // 현재 페이지의 데이터 꺼내기 (문자열일 수도 있고 객체일 수도 있도록 안전하게 방어 처리)
+    const currentItem = generatedHistory[historyIndex];
+    const textToInsert =
+      typeof currentItem === "object" ? currentItem.text : currentItem;
+    const usage = typeof currentItem === "object" ? currentItem.usage : null;
+    const usedModel = typeof currentItem === "object" ? currentItem.model : "";
+
+    // 입력창에 글자 넣기
+    if (chatInput.tagName === "TEXTAREA") {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      ).set;
+      setter.call(chatInput, textToInsert);
+      chatInput.style.height = "auto";
+      chatInput.style.height = chatInput.scrollHeight + "px";
+    } else {
+      chatInput.innerText = textToInsert;
+    }
+
+    chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+    chatInput.focus();
+
+    // 페이지 표시 글자 갱신 (예: 2/2)
+    document.getElementById("history-text").innerText =
+      `${historyIndex + 1}/${generatedHistory.length}`;
+
+    // 💰 [신규 추가] 요금 및 사용량 화면 표시
+    let costDisplayEl = document.getElementById("crack-cost-display");
+    if (!costDisplayEl) {
+      costDisplayEl = document.createElement("div");
+      costDisplayEl.id = "crack-cost-display";
+      costDisplayEl.style.cssText =
+        "font-size: 11px; color: #888; margin-top: 4px; line-height: 1.4; white-space: pre-wrap; background: rgba(0,0,0,0.05); padding: 6px; border-radius: 6px;";
+      hWidget.parentNode.insertBefore(costDisplayEl, hWidget.nextSibling);
+    }
+
+    if (usage) {
+      const costData = calculateCost(usage, 1500, usedModel);
+      if (costData) {
+        const { read, write, output, thoughts } = costData.tokens;
+        const costStr = `₩${costData.krw.toFixed(2)}`;
+
+        // 요청하신 출력 서식 그대로 UI에 주입합니다.
+        costDisplayEl.innerHTML = `📚 캐시읽기: ${read}\n📝 일반입력: ${write}\n💬 일반출력: ${output}\n🤔 추론출력: ${thoughts}\n\n            ${costStr}`;
+        costDisplayEl.style.display = "block";
+      } else {
+        costDisplayEl.style.display = "none";
+      }
+    } else {
+      costDisplayEl.style.display = "none"; // 유저가 첫 페이지(1페이지)에 있을 때는 요금을 숨깁니다.
+    }
+  };
+
+  // =============================================
+  // 3-2. [수정] 마법 버튼(✨) 클릭 이벤트 부분
+  // =============================================
+  gBtn.onclick = async (e) => {
+    e.preventDefault();
+    const chatInput = document.querySelector(
+      '.__chat_input_textarea, div[contenteditable="true"], textarea',
+    );
+    if (!chatInput) return alert("채팅 입력창을 찾을 수 없습니다.");
+
+    const baseText =
+      chatInput.tagName === "TEXTAREA" ? chatInput.value : chatInput.innerText;
+
+    const icon = document.getElementById("magic-icon");
+    icon.innerHTML = "⏳";
+    icon.classList.add("spin-anim");
+
+    try {
+      // 1페이지 채우기 (객체 구조로 통일)
+      if (generatedHistory.length === 0) {
+        generatedHistory.push({ text: baseText, usage: null, model: null });
+      }
+
+      // AI 호출 (이제 result 안에는 { text, usage, model } 이 들어있습니다)
+      const result = await callGemini(baseText);
+
+      // 역사관에 통째로 저장
+      generatedHistory.push(result);
+      historyIndex = generatedHistory.length - 1;
+
+      updateChatInputFromHistory();
+
+      if (generatedHistory.length > 1) {
+        hWidget.style.display = "flex";
+      }
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      icon.innerHTML = "✨";
+      icon.classList.remove("spin-anim");
+    }
+  };
+
+  // =============================================
   // 4. 백그라운드 스캐너
   // =============================================
   function backgroundScanner() {
@@ -399,6 +676,85 @@
     GM_setValue("cfgCustomRule_" + room, e.target.value);
   });
 
+  // =============================================
+  // 4-1. 모델 변경 시 추론 UI를 동적으로 바꾸는 함수
+  // =============================================
+  function updateThinkingUI() {
+    const modelSelect = document.getElementById("g-model"); // 기존 스크립트의 모델 select 태그 ID에 맞게 수정 가능
+    const thinkContainer = document.getElementById("g-think-container");
+    if (!modelSelect || !thinkContainer) return;
+
+    const prevModel = thinkContainer.getAttribute("data-current-model");
+    const currentModel = modelSelect.value;
+    const thinkInput = document.getElementById("g-think-val");
+
+    // 입력 중이던 값 임시 기억장치에 임시 저장하기
+    if (thinkInput && prevModel) {
+      if (prevModel.includes("gemini-3"))
+        tempThinkingLevels[prevModel] = thinkInput.value;
+      else if (prevModel.includes("gemini-2.5"))
+        tempThinkingBudgets[prevModel] = parseInt(thinkInput.value) || 1024;
+    }
+    thinkContainer.setAttribute("data-current-model", currentModel);
+
+    // [경로 A] gemini-3 계열일 때: 선택형(Select) UI 제공
+    if (currentModel.includes("gemini-3")) {
+      let currentLevel =
+        tempThinkingLevels[currentModel] ||
+        (config.thinkingLevels && config.thinkingLevels[currentModel]) ||
+        "medium";
+      let labelPrefix = currentModel.includes("pro") ? "3.1 Pro" : "Flash";
+
+      if (currentModel.includes("pro") && currentLevel === "minimal")
+        currentLevel = "low";
+
+      thinkContainer.innerHTML = `
+            <label style="display:block; margin-top:10px; font-weight:bold;">🧠 ${labelPrefix} 추론 설정</label>
+            <select id="g-think-val" style="width:100%; padding:5px; margin-top:5px; border-radius:4px; background:hsl(var(--background)); color:hsl(var(--foreground)); border:1px solid hsl(var(--border));">
+                <option value="minimal" ${currentLevel === "minimal" ? "selected" : ""}>Minimal</option>
+                <option value="low" ${currentLevel === "low" ? "selected" : ""}>Low</option>
+                <option value="medium" ${currentLevel === "medium" ? "selected" : ""}>Medium</option>
+                <option value="high" ${currentLevel === "high" ? "selected" : ""}>High</option>
+            </select>
+        `;
+      // [경로 B] gemini-2.5 계열일 때: 숫자 입력형(Number) UI 제공
+    } else if (currentModel.includes("gemini-2.5")) {
+      let budget =
+        tempThinkingBudgets[currentModel] ||
+        (config.thinkingBudgets && config.thinkingBudgets[currentModel]) ||
+        1024;
+      thinkContainer.innerHTML = `
+            <label style="display:block; margin-top:10px; font-weight:bold;">🧠 2.5 Pro 예산 (최소 128)</label>
+            <input type="number" id="g-think-val" value="${budget}" min="128" style="width:100%; padding:5px; margin-top:5px; border-radius:4px; background:hsl(var(--background)); color:hsl(var(--foreground)); border:1px solid hsl(var(--border));" />
+        `;
+    } else {
+      thinkContainer.innerHTML = ""; // 일반 모델은 추론 설정 영역을 비웁니다.
+    }
+  }
+
+  // =============================================
+  // 4-2. 모달의 [저장] 버튼 클릭 이벤트 내부 수정
+  // =============================================
+  // 기존 저장(save) 함수 로직 안에 아래 보정 및 저장 코드를 이식해 줍니다.
+  function saveSettingsWithThinking() {
+    const selectedModel = document.getElementById("g-model").value;
+    const thinkInput = document.getElementById("g-think-val");
+
+    if (!config.thinkingLevels) config.thinkingLevels = {};
+    if (!config.thinkingBudgets) config.thinkingBudgets = {};
+
+    if (thinkInput) {
+      if (selectedModel.includes("gemini-3")) {
+        config.thinkingLevels[selectedModel] = thinkInput.value;
+      } else if (selectedModel.includes("gemini-2.5")) {
+        let parsedBudget = parseInt(thinkInput.value) || 1024;
+        if (parsedBudget < 128) parsedBudget = 128; // 🌟 핵심: UI단에서 0이나 128 미만 입력 방지하는 안전장치
+        config.thinkingBudgets[selectedModel] = parsedBudget;
+      }
+    }
+
+    // 이후 기존에 스크립트가 지원하던 GM_setValue 등의 저장 코드가 이어서 실행되면 됩니다.
+  }
   // =============================================
   // 5. 설정 이벤트 & UI 토글
   // =============================================
@@ -918,143 +1274,171 @@
   }
 
   // =============================================
-    // 7. UI 자동 주입 (빈 값 전송 허용 패치 완료)
-    // =============================================
-    let currentRoomId = '';
+  // 7. UI 자동 주입 (빈 값 전송 허용 패치 완료)
+  // =============================================
+  let currentRoomId = "";
 
-    function injectUI() {
-        const newRoomId = getChatRoomId();
-        if (currentRoomId !== newRoomId) {
-            currentRoomId = newRoomId;
-            loadCfg();
-        }
+  function injectUI() {
+    const newRoomId = getChatRoomId();
+    if (currentRoomId !== newRoomId) {
+      currentRoomId = newRoomId;
+      loadCfg();
+    }
 
-        // [1] AI 설정 버튼(⚙️) 주입
-        const modelBtn = Array.from(document.querySelectorAll('button')).find(btn => {
-            return btn.querySelector('img[src*="model-icon"]');
-        });
+    // [1] AI 설정 버튼(⚙️) 주입
+    const modelBtn = Array.from(document.querySelectorAll("button")).find(
+      (btn) => {
+        return btn.querySelector('img[src*="model-icon"]');
+      },
+    );
 
-        if (modelBtn && !document.getElementById('crack-pure-settings-btn')) {
-            const sBtn = document.createElement('button');
-            sBtn.id = 'crack-pure-settings-btn'; sBtn.className = 'crack-pure-settings';
-            sBtn.innerHTML = `⚙️ <span class="setting-btn-text">AI 설정</span>`;
-            sBtn.onclick = (e) => {
-                e.preventDefault();
-                updateContextDisplay();
-                panel.style.display = panel.style.display === 'block' ? 'none' : 'flex';
-            };
-            modelBtn.parentNode.insertBefore(sBtn, modelBtn);
-        }
+    if (modelBtn && !document.getElementById("crack-pure-settings-btn")) {
+      const sBtn = document.createElement("button");
+      sBtn.id = "crack-pure-settings-btn";
+      sBtn.className = "crack-pure-settings";
+      sBtn.innerHTML = `⚙️ <span class="setting-btn-text">AI 설정</span>`;
+      sBtn.onclick = (e) => {
+        e.preventDefault();
+        updateContextDisplay();
+        panel.style.display = panel.style.display === "block" ? "none" : "flex";
+      };
+      modelBtn.parentNode.insertBefore(sBtn, modelBtn);
+    }
 
-        // [2] 마법 버튼(✨) 주입을 위한 전송 버튼 찾기
-        const sendBtnIcon = document.querySelector('path[d*="M18.77 11.13"]');
-        const sendBtn = sendBtnIcon ? sendBtnIcon.closest('button') : null;
+    // [2] 마법 버튼(✨) 주입을 위한 전송 버튼 찾기
+    const sendBtnIcon = document.querySelector('path[d*="M18.77 11.13"]');
+    const sendBtn = sendBtnIcon ? sendBtnIcon.closest("button") : null;
 
-        if (sendBtn && !document.getElementById('crack-pure-magic-btn')) {
-            const group = document.createElement('div'); group.className = 'crack-right-group';
-            sendBtn.parentNode.insertBefore(group, sendBtn);
+    if (sendBtn && !document.getElementById("crack-pure-magic-btn")) {
+      const group = document.createElement("div");
+      group.className = "crack-right-group";
+      sendBtn.parentNode.insertBefore(group, sendBtn);
 
-            const hWidget = document.createElement('div');
-            hWidget.id = 'crack-history-widget';
-            hWidget.className = 'crack-history-widget';
-            hWidget.innerHTML = `
+      const hWidget = document.createElement("div");
+      hWidget.id = "crack-history-widget";
+      hWidget.className = "crack-history-widget";
+      hWidget.innerHTML = `
                 <span class="crack-history-btn" id="history-prev">◀</span>
                 <span id="history-text">1/1</span>
                 <span class="crack-history-btn" id="history-next">▶</span>
             `;
-            group.appendChild(hWidget);
+      group.appendChild(hWidget);
 
-            const gBtn = document.createElement('button');
-            gBtn.id = 'crack-pure-magic-btn'; gBtn.className = 'crack-pure-magic';
-            gBtn.innerHTML = `<span id="magic-icon" style="font-size: 14px;">✨</span>`;
+      const gBtn = document.createElement("button");
+      gBtn.id = "crack-pure-magic-btn";
+      gBtn.className = "crack-pure-magic";
+      gBtn.innerHTML = `<span id="magic-icon" style="font-size: 14px;">✨</span>`;
 
-            // 페이지 이동 시 글자 주입 함수
-            const updateChatInputFromHistory = () => {
-                const chatInput = document.querySelector('.__chat_input_textarea, div[contenteditable="true"], textarea');
-                if (!chatInput || generatedHistory.length === 0) return;
+      // 페이지 이동 시 글자 주입 함수
+      const updateChatInputFromHistory = () => {
+        const chatInput = document.querySelector(
+          '.__chat_input_textarea, div[contenteditable="true"], textarea',
+        );
+        if (!chatInput || generatedHistory.length === 0) return;
 
-                const textToInsert = generatedHistory[historyIndex];
+        const textToInsert = generatedHistory[historyIndex];
 
-                if (chatInput.tagName === 'TEXTAREA') {
-                    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-                    setter.call(chatInput, textToInsert);
-                    chatInput.style.height = 'auto'; 
-                    chatInput.style.height = chatInput.scrollHeight + 'px';
-                } else {
-                    chatInput.innerText = textToInsert;
-                }
-                
-                chatInput.dispatchEvent(new Event('input', { bubbles: true }));
-                chatInput.focus();
-
-                document.getElementById('history-text').innerText = `${historyIndex + 1}/${generatedHistory.length}`;
-            };
-
-            hWidget.querySelector('#history-prev').onclick = (e) => {
-                e.preventDefault();
-                if (historyIndex > 0) { historyIndex--; updateChatInputFromHistory(); }
-            };
-            hWidget.querySelector('#history-next').onclick = (e) => {
-                e.preventDefault();
-                if (historyIndex < generatedHistory.length - 1) { historyIndex++; updateChatInputFromHistory(); }
-            };
-
-            // 마법 버튼 클릭 이벤트
-            gBtn.onclick = async (e) => {
-                e.preventDefault();
-                const chatInput = document.querySelector('.__chat_input_textarea, div[contenteditable="true"], textarea');
-                if (!chatInput) return alert('채팅 입력창을 찾을 수 없습니다.');
-
-                // 🌟 원래대로 글자 제한 없이 온전하게 입력값을 가져옵니다 (비어있어도 OK)
-                const baseText = chatInput.tagName === 'TEXTAREA' ? chatInput.value : chatInput.innerText;
-
-                const icon = document.getElementById('magic-icon');
-                icon.innerHTML = '⏳'; icon.classList.add('spin-anim');
-
-                try {
-                    // 🌟 'if (!baseText) return;' 코드를 삭제했기 때문에 빈 값이어도 아래로 정상 통과합니다!
-                    if (generatedHistory.length === 0) {
-                        generatedHistory.push(baseText);
-                    }
-
-                    const result = await callGemini(baseText);
-
-                    generatedHistory.push(result);
-                    historyIndex = generatedHistory.length - 1;
-
-                    updateChatInputFromHistory();
-
-                    if (generatedHistory.length > 1) {
-                        hWidget.style.display = 'flex';
-                    }
-
-                } catch (err) { alert(err.message); }
-                finally { icon.innerHTML = '✨'; icon.classList.remove('spin-anim'); }
-            };
-
-            group.appendChild(gBtn);
-            group.appendChild(sendBtn);
-
-            sendBtn.addEventListener('click', () => {
-                generatedHistory = [];
-                historyIndex = -1;
-                hWidget.style.display = 'none';
-            });
+        if (chatInput.tagName === "TEXTAREA") {
+          const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLTextAreaElement.prototype,
+            "value",
+          ).set;
+          setter.call(chatInput, textToInsert);
+          chatInput.style.height = "auto";
+          chatInput.style.height = chatInput.scrollHeight + "px";
+        } else {
+          chatInput.innerText = textToInsert;
         }
 
-        const chatInput = document.querySelector('.__chat_input_textarea, div[contenteditable="true"], textarea');
-        if (chatInput && !chatInput.dataset.historyHooked) {
-            chatInput.dataset.historyHooked = 'true';
-            chatInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    generatedHistory = [];
-                    historyIndex = -1;
-                    const w = document.getElementById('crack-history-widget');
-                    if (w) w.style.display = 'none';
-                }
-            });
+        chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+        chatInput.focus();
+
+        document.getElementById("history-text").innerText =
+          `${historyIndex + 1}/${generatedHistory.length}`;
+      };
+
+      hWidget.querySelector("#history-prev").onclick = (e) => {
+        e.preventDefault();
+        if (historyIndex > 0) {
+          historyIndex--;
+          updateChatInputFromHistory();
         }
+      };
+      hWidget.querySelector("#history-next").onclick = (e) => {
+        e.preventDefault();
+        if (historyIndex < generatedHistory.length - 1) {
+          historyIndex++;
+          updateChatInputFromHistory();
+        }
+      };
+
+      // 마법 버튼 클릭 이벤트
+      gBtn.onclick = async (e) => {
+        e.preventDefault();
+        const chatInput = document.querySelector(
+          '.__chat_input_textarea, div[contenteditable="true"], textarea',
+        );
+        if (!chatInput) return alert("채팅 입력창을 찾을 수 없습니다.");
+
+        // 🌟 원래대로 글자 제한 없이 온전하게 입력값을 가져옵니다 (비어있어도 OK)
+        const baseText =
+          chatInput.tagName === "TEXTAREA"
+            ? chatInput.value
+            : chatInput.innerText;
+
+        const icon = document.getElementById("magic-icon");
+        icon.innerHTML = "⏳";
+        icon.classList.add("spin-anim");
+
+        try {
+          // 🌟 'if (!baseText) return;' 코드를 삭제했기 때문에 빈 값이어도 아래로 정상 통과합니다!
+          if (generatedHistory.length === 0) {
+            generatedHistory.push(baseText);
+          }
+
+          const result = await callGemini(baseText);
+
+          generatedHistory.push(result);
+          historyIndex = generatedHistory.length - 1;
+
+          updateChatInputFromHistory();
+
+          if (generatedHistory.length > 1) {
+            hWidget.style.display = "flex";
+          }
+        } catch (err) {
+          alert(err.message);
+        } finally {
+          icon.innerHTML = "✨";
+          icon.classList.remove("spin-anim");
+        }
+      };
+
+      group.appendChild(gBtn);
+      group.appendChild(sendBtn);
+
+      sendBtn.addEventListener("click", () => {
+        generatedHistory = [];
+        historyIndex = -1;
+        hWidget.style.display = "none";
+      });
     }
+
+    const chatInput = document.querySelector(
+      '.__chat_input_textarea, div[contenteditable="true"], textarea',
+    );
+    if (chatInput && !chatInput.dataset.historyHooked) {
+      chatInput.dataset.historyHooked = "true";
+      chatInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          generatedHistory = [];
+          historyIndex = -1;
+          const w = document.getElementById("crack-history-widget");
+          if (w) w.style.display = "none";
+        }
+      });
+    }
+  }
 
   setInterval(() => {
     backgroundScanner();
