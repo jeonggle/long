@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         크랙 AI 답변 커스텀(제미나이API & Firebase 통합)
 // @namespace    http://tampermonkey.net/
-// @version      3.3.1
+// @version      3.3.2
 // @description  명령어 퀄리티 극대화, 설정 버튼 반응형(모바일) UI 패치, Firebase Vertex API 지원 추가
 // @match        https://crack.wrtn.ai/*
 // @grant        GM_addStyle
