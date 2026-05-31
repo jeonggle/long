@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         크랙 AI 답변 커스텀(제미나이API & Firebase 통합)
 // @namespace    http://tampermonkey.net/
-// @version      3.4.1
+// @version      3.4.2
 // @description  페이지 버그 수정, 요금 계산 UI 추가 등
 // @match        https://crack.wrtn.ai/*
 // @grant        GM_addStyle
@@ -502,7 +502,7 @@
   }
 
   dragHandle.addEventListener("mousedown", (e) => {
-    isDragging = true;
+    pendingDrag = true;
     startX = e.clientX;
     startY = e.clientY;
     const rect = panel.getBoundingClientRect();
@@ -511,7 +511,13 @@
   });
 
   document.addEventListener("mousemove", (e) => {
-    if (!isDragging) return;
+    if (!pendingDrag) return;
+    // 5px 이상 움직였을 때만 진짜 드래그로 확정
+    if (!isDragging) {
+      if (Math.abs(e.clientX - startX) < 5 && Math.abs(e.clientY - startY) < 5)
+        return;
+      isDragging = true;
+    }
     e.preventDefault();
     let newLeft = Math.max(
       0,
@@ -533,6 +539,7 @@
   });
 
   document.addEventListener("mouseup", () => {
+    pendingDrag = false;
     if (isDragging) {
       isDragging = false;
       GM_setValue("panelLeft", parseInt(panel.style.left));
@@ -763,6 +770,12 @@
   };
 
   function initPanelEvents() {
+    // ✅ 수정 코드 — mousedown에서 전파를 막아야 함
+    document
+      .getElementById("close-panel")
+      .addEventListener("mousedown", (e) => {
+        e.stopPropagation();
+      });
     document.getElementById("close-panel").onclick = () =>
       (panel.style.display = "none");
 
@@ -792,6 +805,10 @@
     document.querySelectorAll(".acc-header").forEach((header) => {
       // 화살표 span을 미리 변수로 저장 (innerHTML 전체를 건드리지 않음)
       const arrowSpan = header.querySelector("span");
+
+      header.addEventListener("mousedown", (e) => {
+        e.stopPropagation(); // ← 핵심! 드래그 이벤트로 올라가지 못하게 차단
+      });
 
       header.addEventListener("click", () => {
         const target = document.getElementById(
