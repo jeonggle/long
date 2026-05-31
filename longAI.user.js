@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         크랙 AI 답변 커스텀(제미나이API & Firebase 통합)
 // @namespace    http://tampermonkey.net/
-// @version      3.4.3
+// @version      3.4.4
 // @description  페이지 버그 수정, 요금 계산 UI 추가 등
 // @match        https://crack.wrtn.ai/*
 // @grant        GM_addStyle
@@ -476,6 +476,7 @@
   // =============================================
   const dragHandle = document.getElementById("panel-drag-handle");
   let pendingDrag = false,
+    isDragging = false,
     startX,
     startY,
     initLeft,
