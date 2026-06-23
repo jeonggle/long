@@ -1691,23 +1691,9 @@ GM_addStyle(`
         display: "Gemini 3.5 Flash",
         requester: GeminiRequester.GENERIC_REQUESTER,
       },
-      "gemini-3-pro-preview": {
-        name: "gemini-3-pro-preview",
-        display: "Gemini 3 Pro (Preview)",
-        requester: GeminiRequester.GENERIC_REQUESTER,
-        warning: "Gemini 3은 2025년 11월 26일 기준으로 무료 티어가 존재하지 않습니다.",
-      },
-      "gemini-3-pro-preview-search": {
-        name: "gemini-3-pro-preview",
-        display: "Gemini 3 Pro Search (Preview)",
-        requester: new GeminiRequester((body) => {
-          body.tools = [{ google_search: {} }];
-        }),
-        warning: "Gemini 3은 2025년 11월 26일 기준으로 무료 티어가 존재하지 않습니다.\n 또한 Gemini 3 Pro Search는 구글 검색을 사용하며, 검색 엔진의 입력 토큰도 과금에 포함됩니다.",
-      },
-      "gemini-3-flash-preview": {
-        name: "gemini-3-flash-preview",
-        display: "Gemini 3 Flash (Preview)",
+      "gemini-3.1-pro-preview": {
+        name: "gemini-3.1-pro-preview",
+        display: "Gemini 3.1 Pro (Preview)",
         requester: GeminiRequester.GENERIC_REQUESTER,
       },
       "gemini-2.5-pro": {
@@ -1743,15 +1729,9 @@ GM_addStyle(`
         display: "Gemini 3.5 Flash",
         requester: FirebaseRequester.GENERIC_REQUESTER,
       },
-      "gemini-3-pro-preview": {
-        name: "gemini-3-pro-preview",
-        display: "Gemini 3 Pro (Preview)",
-        requester: FirebaseRequester.GENERIC_REQUESTER,
-        warning: "Gemini 3은 2025년 11월 26일 기준으로 무료 티어가 존재하지 않습니다.",
-      },
-      "gemini-3-flash-preview": {
-        name: "gemini-3-flash-preview",
-        display: "Gemini 3 Flash (Preview)",
+      "gemini-3.1-pro-preview": {
+        name: "gemini-3.1-pro-preview",
+        display: "Gemini 3.1 Pro (Preview)",
         requester: FirebaseRequester.GENERIC_REQUESTER,
       },
       "gemini-2.5-pro": {
