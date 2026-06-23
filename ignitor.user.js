@@ -1686,6 +1686,11 @@ GM_addStyle(`
   }, 1000);
   const MODEL_MAPPINGS = {
     Google: {
+        "gemini-3.5-flash: {
+        name: "gemini-3.5-flash",
+        display: "Gemini 3.5 Flash",
+        requester: GeminiRequester.GENERIC_REQUESTER,
+      },
       "gemini-3-pro-preview": {
         name: "gemini-3-pro-preview",
         display: "Gemini 3 Pro (Preview)",
@@ -1733,6 +1738,11 @@ GM_addStyle(`
     },
 
     "Firebase Vertex AI": {
+        "gemini-3.5-flash": {
+        name: "gemini-3.5-flash",
+        display: "Gemini 3.5 Flash",
+        requester: GeminiRequester.GENERIC_REQUESTER,
+      },
       "gemini-3-pro-preview": {
         name: "gemini-3-pro-preview",
         display: "Gemini 3 Pro (Preview)",
