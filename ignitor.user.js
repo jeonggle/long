@@ -1686,7 +1686,7 @@ GM_addStyle(`
   }, 1000);
   const MODEL_MAPPINGS = {
     Google: {
-        "gemini-3.5-flash: {
+        "gemini-3.5-flash": {
         name: "gemini-3.5-flash",
         display: "Gemini 3.5 Flash",
         requester: GeminiRequester.GENERIC_REQUESTER,
