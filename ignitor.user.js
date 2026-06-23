@@ -1741,7 +1741,7 @@ GM_addStyle(`
         "gemini-3.5-flash": {
         name: "gemini-3.5-flash",
         display: "Gemini 3.5 Flash",
-        requester: GeminiRequester.GENERIC_REQUESTER,
+        requester: FirebaseRequester.GENERIC_REQUESTER,
       },
       "gemini-3-pro-preview": {
         name: "gemini-3-pro-preview",
