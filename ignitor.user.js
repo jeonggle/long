@@ -412,7 +412,7 @@ GM_addStyle(`
         }
         try {
           const ai = getAI(app, {
-            backend: new VertexAIBackend(),
+            backend: new VertexAIBackend("global"),
           });
           const safetySettings = [
             {
